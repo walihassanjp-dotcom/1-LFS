@@ -1,1 +1,72 @@
+// =================================================================
+// STEP 1: DEFINE YOUR LANDFILL SITE PARAMETERS
+// =================================================================
+// Coordinates for Jam Chakro Landfill, Karachi.
+var lfs_longitude = 67.030225;
+var lfs_latitude = 25.029688;
 
+// Create a GEE geometry object from your coordinates.
+var lfs_point = ee.Geometry.Point(lfs_longitude, lfs_latitude);
+
+// Create a 10-kilometer (10000 meters) buffer around the point.
+var buffer_10km = lfs_point.buffer(10000);
+
+
+// =================================================================
+// STEP 2: LOAD AND FILTER THE SATELLITE DATA
+// =================================================================
+// Load the VIIRS Nighttime Lights monthly composite data collection.
+var ntlMonthly = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG')
+                     .select('avg_rad');
+
+// Define the full time period for the analysis.
+var startDate = '2014-01-01';
+var endDate = '2025-08-01'; // As of Aug 29, 2025
+
+// Filter the collection to your desired date range.
+var ntlFiltered = ntlMonthly.filter(ee.Filter.date(startDate, endDate));
+
+
+// =================================================================
+// STEP 3: CALCULATE THE SUM OF LIGHTS FOR EACH MONTH
+// =================================================================
+// This function calculates the Sum of Lights (SOL) for a single image
+// and returns it as a feature with a date and the SOL value.
+var calculateMonthlySOL = function(image) {
+  // Calculate the sum of all pixel values within the buffer.
+  var stats = image.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: buffer_10km,
+    scale: 750, // Native resolution of the data
+    maxPixels: 1e9
+  });
+  
+  // Create a null geometry feature to hold the results.
+  // Add the date and the calculated sum as properties.
+  return ee.Feature(null, {
+    'date': image.date().format('YYYY-MM-dd'),
+    'sum_of_lights': stats.get('avg_rad')
+  });
+};
+
+// Apply the function to every image in the filtered collection.
+var monthlySOL = ntlFiltered.map(calculateMonthlySOL);
+
+
+// =================================================================
+// STEP 4: EXPORT THE DATA TO YOUR GOOGLE DRIVE
+// =================================================================
+// Export the resulting FeatureCollection as a CSV file.
+Export.table.toDrive({
+  collection: monthlySOL,
+  description: 'JamChakro_Monthly_NTL_2014-2025', // This will be the file name
+  folder: 'GEE_Exports', // Optional: a folder in your Google Drive
+  fileFormat: 'CSV'
+});
+
+
+// =================================================================
+// Optional: Display the buffer on the map for context
+// =================================================================
+Map.centerObject(buffer_10km, 11);
+Map.addLayer(buffer_10km, {color: 'yellow'}, '10km Buffer');
